@@ -35,7 +35,7 @@ func writeFmt(w io.Writer, f *File) (err error) {
 	write(&b, f.Channels)
 	write(&b, f.SampleRate)
 	write(&b, uint32(f.Channels)*f.SampleRate*uint32(f.SignificantBits)/8) // bytes per second
-	write(&b, f.SignificantBits/8*f.Channels)         // block align
+	write(&b, f.SignificantBits/8*f.Channels)                              // block align
 	write(&b, f.SignificantBits)
 	return writeChunk(w, "fmt ", b.Bytes())
 }
