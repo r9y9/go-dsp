@@ -111,7 +111,7 @@ func readSampleFromData(data []byte, sampleIndex int, header WavHeader) (sample 
 		if header.BitsPerSample == 8 {
 			sample[channelIdx] = int(data[sampleIndex*int(header.NumChannels)+channelIdx])
 		} else if header.BitsPerSample == 16 {
-			sample[channelIdx] = int(bLEtoInt16(data, 2*sampleIndex*int(header.NumChannels)+channelIdx))
+			sample[channelIdx] = int(bLEtoInt16(data, 2*(sampleIndex*int(header.NumChannels)+channelIdx)))
 		}
 	}
 
