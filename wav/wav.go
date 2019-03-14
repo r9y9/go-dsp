@@ -21,13 +21,13 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"strings"
 )
 
 const (
 	RIFFMarkerOffset = 0
 	WAVEMarkerOffset = 8
 	FMTMarkerOffset  = 12
-	DataMarkerOffset = 36
 
 	AudioFormatOffset   = 20
 	NumChannelsOffset   = 22
@@ -35,19 +35,18 @@ const (
 	ByteRateOffset      = 28
 	BlockAlignOffset    = 32
 	BitsPerSampleOffset = 34
-	ChunkSizeOffset     = 40
-	ExpectedHeaderSize  = 44
 )
 
 type WavHeader struct {
-	AudioFormat   uint16
-	NumChannels   uint16
-	SampleRate    uint32
-	ByteRate      uint32
-	BlockAlign    uint16
-	BitsPerSample uint16
-	ChunkSize     uint32
-	NumSamples    int
+	AudioFormat      uint16
+	NumChannels      uint16
+	SampleRate       uint32
+	ByteRate         uint32
+	BlockAlign       uint16
+	BitsPerSample    uint16
+	ChunkSize        uint32
+	NumSamples       int
+	DataMarkerOffset int
 }
 
 type Wav struct {
@@ -66,12 +65,19 @@ type StreamedWav struct {
 	io.Reader
 }
 
-func checkHeader(header []byte) error {
-	if len(header) < ExpectedHeaderSize {
-		return errors.New("wav: Invalid header size")
+//Scans the file for presence of "data"
+func getDataMarkerOffset(filedata []byte) int {
+	stringdata := string(filedata)
+	if !strings.Contains(stringdata, "data") {
+		return -1
 	}
+	index := strings.Index(stringdata, "data")
+	return index
+}
+
+func checkHeader(header []byte, datamarkeroffset int) error {
 	if string(header[0:4]) != "RIFF" {
-		return errors.New("wav: Header does not conatin 'RIFF'")
+		return errors.New("wav: Header does not contain 'RIFF'")
 	}
 	if string(header[8:12]) != "WAVE" {
 		return errors.New("wav: Header does not contain 'WAVE'")
@@ -79,7 +85,7 @@ func checkHeader(header []byte) error {
 	if string(header[12:16]) != "fmt " {
 		return errors.New("wav: Header does not contain 'fmt'")
 	}
-	if string(header[36:40]) != "data" {
+	if string(header[datamarkeroffset:datamarkeroffset+4]) != "data" {
 		return errors.New("wav: Header does not contain 'data'")
 	}
 
@@ -87,7 +93,7 @@ func checkHeader(header []byte) error {
 }
 
 func (wavHeader *WavHeader) setupWithHeaderData(header []byte) (err error) {
-	if err = checkHeader(header); err != nil {
+	if err = checkHeader(header, wavHeader.DataMarkerOffset); err != nil {
 		return
 	}
 
@@ -97,7 +103,7 @@ func (wavHeader *WavHeader) setupWithHeaderData(header []byte) (err error) {
 	wavHeader.ByteRate = bLEtoUint32(header, ByteRateOffset)
 	wavHeader.BlockAlign = bLEtoUint16(header, BlockAlignOffset)
 	wavHeader.BitsPerSample = bLEtoUint16(header, BitsPerSampleOffset)
-	wavHeader.ChunkSize = bLEtoUint32(header, ChunkSizeOffset)
+	wavHeader.ChunkSize = bLEtoUint32(header, wavHeader.DataMarkerOffset+4)
 	wavHeader.NumSamples = int(wavHeader.ChunkSize) / int(wavHeader.BlockAlign)
 
 	return
@@ -130,12 +136,18 @@ func ReadWav(r io.Reader) (wav *Wav, err error) {
 	}
 
 	wav = new(Wav)
+	dataMarkerOffset := getDataMarkerOffset(bytes)
+	if dataMarkerOffset == -1 {
+		err = errors.New("data header not found")
+		return nil, err
+	}
+	wav.DataMarkerOffset = dataMarkerOffset
 	err = wav.WavHeader.setupWithHeaderData(bytes)
 	if err != nil {
 		return nil, err
 	}
 
-	data := bytes[ExpectedHeaderSize : int(wav.ChunkSize)+ExpectedHeaderSize]
+	data := bytes[dataMarkerOffset+8 : int(wav.ChunkSize)+dataMarkerOffset+8]
 
 	wav.Data = make([][]int, wav.NumSamples)
 
@@ -177,8 +189,19 @@ func StreamWav(reader io.Reader) (wav *StreamedWav, err error) {
 	if reader == nil {
 		return nil, errors.New("wav: Invalid Reader")
 	}
+	stringdata := ""
+	headerdataoffset := 0
+	for !strings.Contains(stringdata, "data") {
+		singlebyte := make([]byte, 1)
+		_, readerror := reader.Read(singlebyte)
+		if readerror != nil {
+			break
+		}
+		stringdata += string(singlebyte)
+		headerdataoffset++
+	}
 
-	header := make([]byte, ExpectedHeaderSize)
+	header := make([]byte, headerdataoffset+8)
 	_, err = reader.Read(header)
 	if err != nil {
 		return nil, err
